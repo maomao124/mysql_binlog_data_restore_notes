@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="SqlDialectMappings">
+    <file url="file://$PROJECT_DIR$/MySQL基于binlog数据恢复方案笔记.md" dialect="MySQL" />
+  </component>
+</project>
