@@ -26,6 +26,22 @@ binlog 通过追加的方式写入，可以通过 `max_binlog_size` 参数配置
 
 
 
+![image-20230930112133351](img/MySQL基于binlog数据恢复方案笔记/image-20230930112133351.png)
+
+
+
+可以使用阿里巴巴的Canal中间件来实现binLog日志监听
+
+![image-20230930112351232](img/MySQL基于binlog数据恢复方案笔记/image-20230930112351232.png)
+
+
+
+
+
+
+
+
+
 ## 刷盘机制
 
 对于 InnoDB 存储引擎，在事务提交后，才会记录 binlog 日志，此时日志在内存中，通过参数 sync_binlog 控制刷盘时间，sync_binlog 值有以下几种：
@@ -876,4 +892,282 @@ binlog_row_image参数，只在row模式下生效
 * binlog_row_image为NOBLOB时，如果表有主键或唯一索引，修改列为text/blob列，前镜像忽略text/blob列，后镜像包含被修改的text/blob列；如果表有主键或唯一索引，修改列不是text/blob列，前后镜像忽略text/blob列。如果表没有主键或唯一索引，修改列为text/blob列 ，前后镜像全保留；如果表没有主键或唯一索引，修改列不是text/blob列，前镜像全保留，后镜像忽略text/blob列
 
 
+
+
+
+### binlog的区别
+
+三者取值不同，binlog会有一定的区别
+
+
+
+#### FULL
+
+##### 有主键约束
+
+```sql
+CREATE TABLE 'test1' (
+    'id' int(11) NOT NULL,
+    'name' varchar(10) DEFAULT NULL,
+    primary key('id')
+);
+
+INSERT into test1 values(1,'jack'),(2,'mary');
+
+UPDATE test1 SET name='bob' WHERE id=2;
+```
+
+
+
+使用mysqlbinlog解析binlog，得到的记录镜像信息如下：
+
+```sh
+### UPDATE 'test1','test1'
+### WHERE
+###	  @1=2
+###   @2='mary'
+### SET
+###   @1=2
+###   @2='bob'
+```
+
+
+
+更新记录的前后镜像所有字段都记录了
+
+
+
+
+
+##### 无主键约束
+
+```sql
+CREATE TABLE 'test2' (
+	'id' int(11) DEFAULT NULL,
+    'name' varchar(10) DEFAULT NULL
+);
+
+INSERT into test2 values(1,'bob'),(2,'chang');
+
+UPDATE test2 SET name='jack' WHERE id=2;
+```
+
+
+
+```sh
+### UPDATE 'test','test2'
+### WHERE
+###	  @1=2
+###   @2='chang'
+### SET
+###   @1=2
+###   @2='jack'
+```
+
+
+
+更新记录的前后镜像所有字段都记录了
+
+
+
+
+
+#### MINIMAL
+
+##### 有主键约束
+
+```sql
+CREATE TABLE 'test1' (
+    'id' int(11) NOT NULL,
+    'name' varchar(10) DEFAULT NULL,
+    primary key('id')
+);
+
+INSERT into test1 values(1,'jack'),(2,'mary');
+
+UPDATE test1 SET name='bob' WHERE id=2;
+```
+
+
+
+```sh
+### UPDATE 'test','test1'
+### WHERE
+###	  @1=2
+### SET
+###   @2='bob'
+```
+
+
+
+如果表有主键或唯一索引，前镜像只保留主键列，后镜像只保留修改列
+
+
+
+##### 无主键约束
+
+```sql
+CREATE TABLE 'test2' (
+	'id' int(11) DEFAULT NULL,
+    'name' varchar(10) DEFAULT NULL
+);
+
+INSERT into test2 values(1,'bob'),(2,'chang');
+
+UPDATE test2 SET name='jack' WHERE id=2;
+```
+
+
+
+```sh
+### UPDATE 'test','test2'
+### WHERE
+###	  @1=1
+###   @2='chang'
+### SET
+###   @2='jack'
+```
+
+
+
+如果表没有主键或唯一索引，前镜像全保留，后镜像只保留修改列
+
+
+
+
+
+#### NOBLOB
+
+##### 有主键约束并更新text/blob列
+
+```sql
+CREATE TABLE 'test1' (
+    'id' int(11) NOT NULL,
+    'name' text,
+    'address' varchar(20) DEFAULT NULL,
+    PRIMARY kEY ('id')
+);
+
+INSERT into test1 values(1,'jack','Japen'),(2,'bob','China');
+
+UPDATE test1 SET name='mary' WHERE id=1;
+```
+
+
+
+```sh
+### UPDATE 'test','test1'
+### WHERE
+###	  @1=1
+###   @3='Japen'
+### SET
+###   @1=1
+###   @2='mary'
+###   @3='Japen'
+```
+
+
+
+如果表有主键或唯一索引，修改列为text/blob列，前镜像忽略text/blob列，后镜像包含被修改的text/blob列
+
+
+
+
+
+##### 有主键约束并更新非text/blob列
+
+```sql
+UPDATE test1 SET address='Japen2' WHERE id=1;
+```
+
+
+
+```sh
+### UPDATE 'test','test1'
+### WHERE
+###	  @1=1
+###   @3='Japen'
+### SET
+###   @1=1
+###   @3='Japen2'
+```
+
+
+
+如果表没有主键或唯一索引，修改的列不是text/blob列，则前后镜像都忽略text/blob列
+
+
+
+
+
+##### 无主键约束并更新text/blob列
+
+```sql
+CREATE TABLE 'test2' (
+    'id' int(11) NOT NULL,
+    'name' text DEFAULT NULL,
+    'address' varchar(20) DEFAULT NULL
+);
+
+INSERT into test2 values(1,'jack','Japen'),(2,'bob','China');
+
+UPDATE test2 SET name='mary' WHERE id=1;
+```
+
+
+
+```sh
+### UPDATE 'test','test1'
+### WHERE
+###	  @1=1
+###   @2='jack'
+###   @3='Japen'
+### SET
+###   @1=1
+###   @2='mary'
+###   @3='Japen'
+```
+
+
+
+如果表没有主键或唯一索引，修改列为text/blob列，前后镜像全都保留
+
+
+
+
+
+##### 无主键约束并更新非text/blob列
+
+```sql
+UPDATE test2 SET address='Japen2' WHERE id=1;
+```
+
+
+
+```sh
+### UPDATE 'test','test2'
+### WHERE
+###	  @1=1
+###   @2='mary'
+###   @3='Japen'
+### SET
+###   @1=1
+###   @3='Japen2'
+```
+
+
+
+如果表没有主键或唯一索引，修改列不是text/blob列，则前镜像全保留，后镜像忽略text/blob列
+
+
+
+
+
+
+
+
+
+# 数据闪回
+
+## 概述
 
