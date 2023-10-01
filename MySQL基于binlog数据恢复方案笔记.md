@@ -1,3 +1,29 @@
+[toc]
+
+---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # 概述
 
 DBA或开发人员，有时会误删或者误更新数据，如果是线上环境并且影响较大，就需要能快速回滚。传统恢复方法是利用备份重搭实例，再应用去除错误sql后的binlog来恢复数据。此法费时费力，甚至需要停机维护，并不适合快速回滚。也有团队利用LVM快照来缩短恢复时间，但快照的缺点是会影响mysql的性能。
@@ -1352,7 +1378,7 @@ MySQL中，binlog文件主要用于主从同步二进制数据日志。当主服
 
 
 
-## 闪回大致流程
+## **闪回大致流程**
 
 1. **误删MySQL某张表的数据**
 2. **立即记录当前时间（不记录当前时间也可以，但是要解析整个binlog文件）**
@@ -1382,4 +1408,771 @@ MySQL中，binlog文件主要用于主从同步二进制数据日志。当主服
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+# my2sql
+
+## 概述
+
+go版MySQL binlog解析工具，通过解析MySQL binlog ，可以生成原始SQL、回滚SQL、去除主键的INSERT SQL等，也可以生成DML统计信息
+
+
+
+优点：
+
+* 功能丰富，不仅支持回滚操作，还有其他实用功能
+* 基于golang实现，速度快，全量解析1.1G 的binlog日志只需要1分30秒左右，当前其他类似开源工具一般要几十分钟
+
+
+
+
+
+开源地址：https://github.com/liuhr/my2sql
+
+
+
+用途：
+
+- 数据快速回滚(闪回)
+- 主从切换后新master丢数据的修复
+- 从binlog生成标准SQL，带来的衍生功能
+- 生成DML统计信息，可以找到哪些表更新的比较频繁
+- IO高TPS高， 查出哪些表在频繁更新
+- 找出某个时间点数据库是否有大事务或者长事务
+- 主从延迟，分析主库执行的SQL语句
+- 除了支持常规数据类型，对大部分工具不支持的数据类型做了支持，比如json、blob、text、emoji等数据类型sql生成
+
+
+
+
+
+
+
+## 环境部署
+
+项目是用go语言写的，需要go语言环境，拉取代码需要git
+
+
+
+### go语言环境
+
+#### 介绍
+
+Go（又称 Golang）是 Google 的 Robert Griesemer，Rob Pike 及 Ken Thompson 开发的一种静态强类型、编译型语言。Go 语言语法与 C 相近，但功能上有：
+
+* **内存安全**：将一切并发化固然是好，但带来的问题同样很多。如何实现高并发下的内存分配和管理就是个难题。好在 Go 选择了 tcmalloc，它本就是为并发而设计的高性能内存分配组件。内存分配器是运行时三大组件里变化最少的部分。刨去因配合垃圾回收器而修改的内容，内存分配器完整保留了 tcmalloc 的原始架构。使用 cache 为当前执行线程提供无锁分配，多个 central 在不同线程间平衡内存单元复用。在更高层次里，heap 则管理着大块内存，用以切分成不同等级的复用内存块。快速分配和二级内存平衡机制，让内存分配器能优秀地完成高压力下的内存管理任务。在最近几个版本中，编译器优化卓有成效。它会竭力将对象分配在栈上，以降低垃圾回收压力，减少管理消耗，提升执行性能。
+* **GC（垃圾回收）**：垃圾回收一直是个难题。早年间，Java 就因垃圾回收低效被嘲笑了许久，后来 Sun 连续收纳了好多人和技术才发展到今天。可即便如此，在 Hadoop 等大内存应用场景下，垃圾回收依旧捉襟见肘、步履维艰。相比 Java，Go 面临的困难要更多。因指针的存在，所以回收内存不能做收缩处理。幸好，指针运算被阻止，否则要做到精确回收都难。每次升级，垃圾回收器必然是核心组件里修改最多的部分。从并发清理，到降低 STW 时间，直到 Go 的 1.5 版本实现并发标记，逐步引入三色标记和写屏障等等，都是为了能让垃圾回收在不影响用户逻辑的情况下更好地工作。尽管有了努力，当前版本的垃圾回收算法也只能说堪用，离好用尚有不少距离。
+* **结构形态**：Go 刚发布时，静态链接被当作优点宣传。只须编译后的一个可执行文件，无须附加任何东西就能部署。这似乎很不错，只是后来风气变了。连着几个版本，编译器都在完善动态库 buildmode 功能，场面一时变得有些尴尬。静态编译的好处显而易见。将运行时、依赖库直接打包到可执行文件内部，简化了部署和发布操作，无须事先安装运行环境和下载诸多第三方库。这种简单方式对于编写系统软件有着极大好处，因为库依赖一直都是个麻烦。Go 标准库虽称不得完全覆盖，但也算极为丰富。其中值得称道的是 net/http，仅须简单几条语句就能实现一个高性能 Web Server，这从来都是宣传的亮点。更何况大批基于此的优秀第三方 Framework 更是将 Go 推到 Web/Microservice 开发标准之一的位置。
+* **CSP-style 并发计算**：时至今日，并发编程已成为程序员的基本技能，在各个技术社区都能看到诸多与之相关的讨论主题。在这种情况下Go语言却一反常态做了件极大胆的事，从根本上将一切都并发化，运行时用 Goroutine 运行所有的一切，包括 main.main 入口函数。可以说，Goroutine 是 Go 最显著的特征。它用类协程的方式来处理并发单元，却又在运行时层面做了更深度的优化处理。这使得语法上的并发编程变得极为容易，无须处理回调，无须关注线程切换，仅一个关键字，简单而自然。搭配 channel，实现 CSP 模型。将并发单元间的数据耦合拆解开来，各司其职，这对所有纠结于内存共享、锁粒度的开发人员都是一个可期盼的解脱。若说有所不足，那就是应该有个更大的计划，将通信从进程内拓展到进程外，实现真正意义上的分布式。
+
+
+
+
+
+
+
+
+
+Go语言是编程语言设计的又一次尝试，是对类C语言的重大改进，它不但能让你访问底层操作系统，还提供了强大的网络编程和并发编程支持。Go语言的用途众多，可以进行网络编程、系统编程、并发编程、分布式编程
+
+Go语言的推出，旨在不损失应用程序性能的情况下降低代码的复杂性，具有“部署简单、并发性好、语言设计良好、执行性能好”等优势，目前国内诸多 IT 公司均已采用Go语言开发项目
+
+Go语言有时候被描述为“C 类似语言”，或者是“21 世纪的C语言”。Go 从C语言继承了相似的表达式语法、控制流结构、基础数据类型、调用参数传值、指针等很多思想，还有C语言一直所看中的编译后机器码的运行效率以及和现有操作系统的无缝适配
+
+因为Go语言没有类和继承的概念，所以它和 Java 或 C++ 看起来并不相同。但是它通过接口（interface）的概念来实现多态性。Go语言有一个清晰易懂的轻量级类型系统，在类型之间也没有层级之说。因此可以说Go语言是一门混合型的语言
+
+此外，很多重要的开源项目都是使用Go语言开发的，其中包括 Docker、Go-Ethereum、Thrraform 和 Kubernetes
+
+
+
+Go 使用编译器来编译代码。编译器将源代码编译成二进制（或字节码）格式；在编译代码时，编译器检查错误、优化性能并输出可在不同平台上运行的二进制文件。要创建并运行 Go 程序，程序员必须执行如下步骤：
+
+1. 使用文本编辑器创建 Go 程序
+2. 保存文件
+3. 编译程序
+4. 运行编译得到的可执行文件
+
+
+
+Go语言支持交叉编译，比如说你可以在运行 Linux 系统的计算机上开发可以在 Windows 上运行的应用程序
+
+
+
+go语言跨平台的，但是生成的可执行文件不是跨平台的
+
+
+
+![image-20230930204807632](img/MySQL基于binlog数据恢复方案笔记/image-20230930204807632.png)
+
+
+
+
+
+
+
+
+
+#### 下载
+
+在Go语言[官网](https://golang.google.cn/dl/)下载 Windows 系统下的Go语言开发包
+
+
+
+打开官网
+
+![image-20230930205820832](img/MySQL基于binlog数据恢复方案笔记/image-20230930205820832.png)
+
+
+
+
+
+选择对应的版本
+
+![image-20230930205900855](img/MySQL基于binlog数据恢复方案笔记/image-20230930205900855.png)
+
+
+
+或者直接下载：
+
+* Windows：https://golang.google.cn/dl/go1.21.1.windows-amd64.msi
+* Linux：https://golang.google.cn/dl/go1.21.1.linux-amd64.tar.gz
+
+
+
+
+
+
+
+#### 安装
+
+以Windows为例，双击运行下载好的安装包
+
+![image-20230930210136520](img/MySQL基于binlog数据恢复方案笔记/image-20230930210136520.png)
+
+
+
+![image-20230930210304719](img/MySQL基于binlog数据恢复方案笔记/image-20230930210304719.png)
+
+
+
+
+
+选择安装位置
+
+![image-20230930210327534](img/MySQL基于binlog数据恢复方案笔记/image-20230930210327534.png)
+
+
+
+![image-20230930210337043](img/MySQL基于binlog数据恢复方案笔记/image-20230930210337043.png)
+
+
+
+等待安装完成
+
+![image-20230930210351925](img/MySQL基于binlog数据恢复方案笔记/image-20230930210351925.png)
+
+
+
+![image-20230930210406057](img/MySQL基于binlog数据恢复方案笔记/image-20230930210406057.png)
+
+
+
+
+
+
+
+
+
+#### 常用命令
+
+命令如下：
+
+```sh
+PS C:\Users\mao> go help
+Go is a tool for managing Go source code.
+
+Usage:
+
+        go <command> [arguments]
+
+The commands are:
+
+        bug         start a bug report
+        build       compile packages and dependencies
+        clean       remove object files and cached files
+        doc         show documentation for package or symbol
+        env         print Go environment information
+        fix         update packages to use new APIs
+        fmt         gofmt (reformat) package sources
+        generate    generate Go files by processing source
+        get         add dependencies to current module and install them
+        install     compile and install packages and dependencies
+        list        list packages or modules
+        mod         module maintenance
+        work        workspace maintenance
+        run         compile and run Go program
+        test        test packages
+        tool        run specified go tool
+        version     print Go version
+        vet         report likely mistakes in packages
+
+Use "go help <command>" for more information about a command.
+
+Additional help topics:
+
+        buildconstraint build constraints
+        buildmode       build modes
+        c               calling between Go and C
+        cache           build and test caching
+        environment     environment variables
+        filetype        file types
+        go.mod          the go.mod file
+        gopath          GOPATH environment variable
+        gopath-get      legacy GOPATH go get
+        goproxy         module proxy protocol
+        importpath      import path syntax
+        modules         modules, module versions, and more
+        module-get      module-aware go get
+        module-auth     module authentication using go.sum
+        packages        package lists and patterns
+        private         configuration for downloading non-public code
+        testflag        testing flags
+        testfunc        testing functions
+        vcs             controlling version control with GOVCS
+
+Use "go help <topic>" for more information about that topic.
+
+PS C:\Users\mao>
+```
+
+
+
+构建相关(go build)：
+
+```sh
+PS C:\Users\mao> go help build
+usage: go build [-o output] [build flags] [packages]
+
+Build compiles the packages named by the import paths,
+along with their dependencies, but it does not install the results.
+
+If the arguments to build are a list of .go files from a single directory,
+build treats them as a list of source files specifying a single package.
+
+When compiling packages, build ignores files that end in '_test.go'.
+
+When compiling a single main package, build writes
+the resulting executable to an output file named after
+the first source file ('go build ed.go rx.go' writes 'ed' or 'ed.exe')
+or the source code directory ('go build unix/sam' writes 'sam' or 'sam.exe').
+The '.exe' suffix is added when writing a Windows executable.
+
+When compiling multiple packages or a single non-main package,
+build compiles the packages but discards the resulting object,
+serving only as a check that the packages can be built.
+
+The -o flag forces build to write the resulting executable or object
+to the named output file or directory, instead of the default behavior described
+in the last two paragraphs. If the named output is an existing directory or
+ends with a slash or backslash, then any resulting executables
+will be written to that directory.
+
+The build flags are shared by the build, clean, get, install, list, run,
+and test commands:
+
+        -C dir
+                Change to dir before running the command.
+                Any files named on the command line are interpreted after
+                changing directories.
+                If used, this flag must be the first one in the command line.
+        -a
+                force rebuilding of packages that are already up-to-date.
+        -n
+                print the commands but do not run them.
+        -p n
+                the number of programs, such as build commands or
+                test binaries, that can be run in parallel.
+                The default is GOMAXPROCS, normally the number of CPUs available.
+        -race
+                enable data race detection.
+                Supported only on linux/amd64, freebsd/amd64, darwin/amd64, darwin/arm64, windows/amd64,
+                linux/ppc64le and linux/arm64 (only for 48-bit VMA).
+        -msan
+                enable interoperation with memory sanitizer.
+                Supported only on linux/amd64, linux/arm64, freebsd/amd64
+                and only with Clang/LLVM as the host C compiler.
+                PIE build mode will be used on all platforms except linux/amd64.
+        -asan
+                enable interoperation with address sanitizer.
+                Supported only on linux/arm64, linux/amd64.
+                Supported only on linux/amd64 or linux/arm64 and only with GCC 7 and higher
+                or Clang/LLVM 9 and higher.
+        -cover
+                enable code coverage instrumentation.
+        -covermode set,count,atomic
+                set the mode for coverage analysis.
+                The default is "set" unless -race is enabled,
+                in which case it is "atomic".
+                The values:
+                set: bool: does this statement run?
+                count: int: how many times does this statement run?
+                atomic: int: count, but correct in multithreaded tests;
+                        significantly more expensive.
+                Sets -cover.
+        -coverpkg pattern1,pattern2,pattern3
+                For a build that targets package 'main' (e.g. building a Go
+                executable), apply coverage analysis to each package matching
+                the patterns. The default is to apply coverage analysis to
+                packages in the main Go module. See 'go help packages' for a
+                description of package patterns.  Sets -cover.
+        -v
+                print the names of packages as they are compiled.
+        -work
+                print the name of the temporary work directory and
+                do not delete it when exiting.
+        -x
+                print the commands.
+        -asmflags '[pattern=]arg list'
+                arguments to pass on each go tool asm invocation.
+        -buildmode mode
+                build mode to use. See 'go help buildmode' for more.
+        -buildvcs
+                Whether to stamp binaries with version control information
+                ("true", "false", or "auto"). By default ("auto"), version control
+                information is stamped into a binary if the main package, the main module
+                containing it, and the current directory are all in the same repository.
+                Use -buildvcs=false to always omit version control information, or
+                -buildvcs=true to error out if version control information is available but
+                cannot be included due to a missing tool or ambiguous directory structure.
+        -compiler name
+                name of compiler to use, as in runtime.Compiler (gccgo or gc).
+        -gccgoflags '[pattern=]arg list'
+                arguments to pass on each gccgo compiler/linker invocation.
+        -gcflags '[pattern=]arg list'
+                arguments to pass on each go tool compile invocation.
+        -installsuffix suffix
+                a suffix to use in the name of the package installation directory,
+                in order to keep output separate from default builds.
+                If using the -race flag, the install suffix is automatically set to race
+                or, if set explicitly, has _race appended to it. Likewise for the -msan
+                and -asan flags. Using a -buildmode option that requires non-default compile
+                flags has a similar effect.
+        -ldflags '[pattern=]arg list'
+                arguments to pass on each go tool link invocation.
+        -linkshared
+                build code that will be linked against shared libraries previously
+                created with -buildmode=shared.
+        -mod mode
+                module download mode to use: readonly, vendor, or mod.
+                By default, if a vendor directory is present and the go version in go.mod
+                is 1.14 or higher, the go command acts as if -mod=vendor were set.
+                Otherwise, the go command acts as if -mod=readonly were set.
+                See https://golang.org/ref/mod#build-commands for details.
+        -modcacherw
+                leave newly-created directories in the module cache read-write
+                instead of making them read-only.
+        -modfile file
+                in module aware mode, read (and possibly write) an alternate go.mod
+                file instead of the one in the module root directory. A file named
+                "go.mod" must still be present in order to determine the module root
+                directory, but it is not accessed. When -modfile is specified, an
+                alternate go.sum file is also used: its path is derived from the
+                -modfile flag by trimming the ".mod" extension and appending ".sum".
+        -overlay file
+                read a JSON config file that provides an overlay for build operations.
+                The file is a JSON struct with a single field, named 'Replace', that
+                maps each disk file path (a string) to its backing file path, so that
+                a build will run as if the disk file path exists with the contents
+                given by the backing file paths, or as if the disk file path does not
+                exist if its backing file path is empty. Support for the -overlay flag
+                has some limitations: importantly, cgo files included from outside the
+                include path must be in the same directory as the Go package they are
+                included from, and overlays will not appear when binaries and tests are
+                run through go run and go test respectively.
+        -pgo file
+                specify the file path of a profile for profile-guided optimization (PGO).
+                When the special name "auto" is specified, for each main package in the
+                build, the go command selects a file named "default.pgo" in the package's
+                directory if that file exists, and applies it to the (transitive)
+                dependencies of the main package (other packages are not affected).
+                Special name "off" turns off PGO. The default is "auto".
+        -pkgdir dir
+                install and load all packages from dir instead of the usual locations.
+                For example, when building with a non-standard configuration,
+                use -pkgdir to keep generated packages in a separate location.
+        -tags tag,list
+                a comma-separated list of additional build tags to consider satisfied
+                during the build. For more information about build tags, see
+                'go help buildconstraint'. (Earlier versions of Go used a
+                space-separated list, and that form is deprecated but still recognized.)
+        -trimpath
+                remove all file system paths from the resulting executable.
+                Instead of absolute file system paths, the recorded file names
+                will begin either a module path@version (when using modules),
+                or a plain import path (when using the standard library, or GOPATH).
+        -toolexec 'cmd args'
+                a program to use to invoke toolchain programs like vet and asm.
+                For example, instead of running asm, the go command will run
+                'cmd args /path/to/asm <arguments for asm>'.
+                The TOOLEXEC_IMPORTPATH environment variable will be set,
+                matching 'go list -f {{.ImportPath}}' for the package being built.
+
+The -asmflags, -gccgoflags, -gcflags, and -ldflags flags accept a
+space-separated list of arguments to pass to an underlying tool
+during the build. To embed spaces in an element in the list, surround
+it with either single or double quotes. The argument list may be
+preceded by a package pattern and an equal sign, which restricts
+the use of that argument list to the building of packages matching
+that pattern (see 'go help packages' for a description of package
+patterns). Without a pattern, the argument list applies only to the
+packages named on the command line. The flags may be repeated
+with different patterns in order to specify different arguments for
+different sets of packages. If a package matches patterns given in
+multiple flags, the latest match on the command line wins.
+For example, 'go build -gcflags=-S fmt' prints the disassembly
+only for package fmt, while 'go build -gcflags=all=-S fmt'
+prints the disassembly for fmt and all its dependencies.
+
+For more about specifying packages, see 'go help packages'.
+For more about where packages and binaries are installed,
+run 'go help gopath'.
+For more about calling between Go and C/C++, run 'go help c'.
+
+Note: Build adheres to certain conventions such as those described
+by 'go help gopath'. Not all projects can follow these conventions,
+however. Installations that have their own conventions or that use
+a separate software build system may choose to use lower-level
+invocations such as 'go tool compile' and 'go tool link' to avoid
+some of the overheads and design decisions of the build tool.
+
+See also: go install, go get, go clean.
+PS C:\Users\mao>
+```
+
+
+
+
+
+
+
+
+
+
+
+### git版本控制系统
+
+#### 介绍
+
+Git 是一个免费和开源 的分布式版本控制系统，旨在以速度和效率处理从小型到大型项目的所有内容
+
+Git易于学习，占用空间小，性能快如闪电。它优于 SCM 工具，如 Subversion, CVS, Perforce, 和 ClearCase 具有的本地分支, 方便的暂存区域，和多个工作流等功能
+
+关于git，这里不做过多介绍
+
+
+
+
+
+#### 下载
+
+官网地址：https://git-scm.com/
+
+![image-20230930211243648](img/MySQL基于binlog数据恢复方案笔记/image-20230930211243648.png)
+
+
+
+点击下载：
+
+![image-20230930211314512](img/MySQL基于binlog数据恢复方案笔记/image-20230930211314512.png)
+
+
+
+或者直接使用以下链接：
+
+* https://git-scm.com/download/win
+
+
+
+
+
+
+
+#### 安装
+
+自行百度
+
+
+
+
+
+#### 常用命令
+
+```sh
+PS C:\Users\mao> git
+usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
+           [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]
+           [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--bare]
+           [--git-dir=<path>] [--work-tree=<path>] [--namespace=<name>]
+           [--super-prefix=<path>] [--config-env=<name>=<envvar>]
+           <command> [<args>]
+
+These are common Git commands used in various situations:
+
+start a working area (see also: git help tutorial)
+   clone     Clone a repository into a new directory
+   init      Create an empty Git repository or reinitialize an existing one
+
+work on the current change (see also: git help everyday)
+   add       Add file contents to the index
+   mv        Move or rename a file, a directory, or a symlink
+   restore   Restore working tree files
+   rm        Remove files from the working tree and from the index
+
+examine the history and state (see also: git help revisions)
+   bisect    Use binary search to find the commit that introduced a bug
+   diff      Show changes between commits, commit and working tree, etc
+   grep      Print lines matching a pattern
+   log       Show commit logs
+   show      Show various types of objects
+   status    Show the working tree status
+
+grow, mark and tweak your common history
+   branch    List, create, or delete branches
+   commit    Record changes to the repository
+   merge     Join two or more development histories together
+   rebase    Reapply commits on top of another base tip
+   reset     Reset current HEAD to the specified state
+   switch    Switch branches
+   tag       Create, list, delete or verify a tag object signed with GPG
+
+collaborate (see also: git help workflows)
+   fetch     Download objects and refs from another repository
+   pull      Fetch from and integrate with another repository or a local branch
+   push      Update remote refs along with associated objects
+
+'git help -a' and 'git help -g' list available subcommands and some
+concept guides. See 'git help <command>' or 'git help <concept>'
+to read about a specific subcommand or concept.
+See 'git help git' for an overview of the system.
+PS C:\Users\mao>
+```
+
+
+
+
+
+克隆：
+
+```sh
+git clone <url>
+```
+
+
+
+常用命令不止这一个，这里只用到了这个命令，常用命令可以自行百度
+
+
+
+
+
+
+
+
+
+## 项目部署和编译
+
+### 克隆项目
+
+
+
+
+
+
+
+### 编译项目
+
+
+
+
+
+
+
+
+
+
+
+## 常用参数
+
+
+
+
+
+
+
+## 示例
+
+
+
+
+
+
+
+
+
+## 实战
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# binlog2sql
+
+## 概述
+
+
+
+
+
+
+
+
+
+
+
+## 项目部署和编译
+
+### 克隆项目
+
+
+
+
+
+### 编译项目
+
+
+
+
+
+
+
+
+
+
+
+## 常用参数
+
+
+
+
+
+
+
+## 示例
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# MyFlash
+
+## 概述
+
+
+
+
+
+
+
+
+
+
+
+## 环境部署
+
+
+
+
+
+
+
+## 项目部署
+
+### 克隆项目
+
+
+
+
+
+
+
+
+
+
+
+
+
+## 常用参数
+
+
+
+
+
+
+
+## 示例
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# 总结
 
