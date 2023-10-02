@@ -1992,7 +1992,50 @@ git clone <url>
 
 ### 克隆项目
 
+命令：
 
+```sh
+git clone https://github.com/liuhr/my2sql
+```
+
+
+
+如果出现超时等问题，这是正常的，github就是这样，多试几次
+
+
+
+克隆成功后，项目内容如下：
+
+```sh
+PS D:\opensoft\my2sql> ls
+
+
+    目录: D:\opensoft\my2sql
+
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+d-----         2023/9/29     20:23                base
+d-----         2023/9/29     20:23                constvar
+d-----         2023/9/29     20:23                dsql
+d-----         2023/9/29     20:23                ehand
+d-----         2023/9/29     20:23                misc
+d-----         2023/9/29     20:23                releases
+d-----         2023/9/29     20:23                sqlbuilder
+d-----         2023/9/29     20:23                sqltypes
+d-----         2023/9/29     20:23                toolkits
+d-----         2023/9/29     20:23                vendor
+-a----         2023/9/28      0:46             74 .gitignore
+-a----         2023/9/28      0:46              8 .go-version
+-a----         2023/9/28      0:46            860 go.mod
+-a----         2023/9/28      0:46          12425 go.sum
+-a----         2023/9/28      0:46           1065 LICENSE
+-a----         2023/9/28      0:46           1267 main.go
+-a----         2023/9/28      0:46           9881 README.md
+
+
+PS D:\opensoft\my2sql>
+```
 
 
 
@@ -2000,9 +2043,47 @@ git clone <url>
 
 ### 编译项目
 
+命令：
+
+```sh
+go build ./
+```
 
 
 
+生成可执行文件`my2sql.exe`：
+
+```sh
+PS D:\opensoft\my2sql> ls
+
+
+    目录: D:\opensoft\my2sql
+
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+d-----         2023/9/29     20:23                base
+d-----         2023/9/29     20:23                constvar
+d-----         2023/9/29     20:23                dsql
+d-----         2023/9/29     20:23                ehand
+d-----         2023/9/29     20:23                misc
+d-----         2023/9/29     20:23                releases
+d-----         2023/9/29     20:23                sqlbuilder
+d-----         2023/9/29     20:23                sqltypes
+d-----         2023/9/29     20:23                toolkits
+d-----         2023/9/29     20:23                vendor
+-a----         2023/9/28      0:46             74 .gitignore
+-a----         2023/9/28      0:46              8 .go-version
+-a----         2023/9/28      0:46            860 go.mod
+-a----         2023/9/28      0:46          12425 go.sum
+-a----         2023/9/28      0:46           1065 LICENSE
+-a----         2023/9/28      0:46           1267 main.go
+-a----         2023/10/2     19:34        7973376 my2sql.exe
+-a----         2023/9/28      0:46           9881 README.md
+
+
+PS D:\opensoft\my2sql>
+```
 
 
 
@@ -2012,6 +2093,210 @@ git clone <url>
 
 ## 常用参数
 
+```sh
+PS D:\opensoft\my2sql> .\my2sql.exe --help
+my2sql V2.0
+  -U    prefer to use unique key instead of primary key to build where condition for delete/update sql
+  -add-extraInfo
+        Works with -work-type=2sql|rollback. Print database/table/datetime/binlogposition...info on the line before sql, default false
+  -big-trx-row-limit int
+        transaction with affected rows greater or equal to this value is considerated as big transaction. Valid values range from 1 to 30000, default 10 (default 10)
+  -databases string
+        only parse these databases, comma seperated, default all.
+  -do-not-add-prifixDb
+        Prefix table name witch database name in sql,ex: insert into db1.tb1 (x1, x1) values (y1, y1).
+  -file-per-table
+        One file for one table if true, else one file for all tables. default false. Attention, always one file for one binlog
+  -full-columns
+        For update sql, include unchanged columns. for update and delete, use all columns to build where condition.
+        default false, this is, use changed columns to build set part, use primary/unique key to build where condition
+  -host string
+        mysql host, default 127.0.0.1 . (default "127.0.0.1")
+  -ignore-databases string
+        ignore parse these databases, comma seperated, default null
+  -ignore-primaryKey-forInsert
+        for insert statement when -workType=2sql, ignore primary key
+  -ignore-tables string
+        ignore parse these tables, comma seperated, default null
+  -local-binlog-file string
+        local binlog files to process, It works with -mode=file
+  -long-trx-seconds int
+        transaction with duration greater or equal to this value is considerated as long transaction. Valid values range from 0 to 3600, default 1 (default 1)
+  -mode string
+        valid options are:  repl,file. repl: as a slave to get binlogs from master. file: get binlogs from local filesystem. default repl (default "repl")
+  -mysql-type string
+        valid options are:  mysql,mariadb. server of binlog, mysql or mariadb, default mysql (default "mysql")
+  -output-dir string
+        result output dir, default current work dir. Attension, result files could be large, set it to a dir with large free space
+  -output-toScreen
+        Just output to screen,do not write to file
+  -password string
+        mysql user password.
+  -port uint
+        mysql port, default 3306. (default 3306)
+  -print-interval int
+        works with -w='stats', print stats info each PrintInterval. Valid values range from 1 to 600, default 30 (default 30)
+  -server-id uint
+        this program replicates from mysql as slave to read binlogs. Must set this server id unique from other slaves, default 1113306 (default 1113306)
+  -sql string
+        valid options are:  insert,update,delete. only parse these types of sql, comma seperated, valid types are: insert, update, delete; default is all(insert,update,delete)
+  -start-datetime string
+        Start reading the binlog at first event having a datetime equal or posterior to the argument, it should be like this: "2020-01-01 01:00:00"
+  -start-file string
+        binlog file to start reading
+  -start-pos uint
+        start reading the binlog at position (default 4)
+  -stop-datetime string
+        Stop reading the binlog at first event having a datetime equal or posterior to the argument, it should be like this: "2020-12-30 01:00:00"
+  -stop-file string
+        binlog file to stop reading
+  -stop-pos uint
+        Stop reading the binlog at position (default 4)
+  -tables string
+        only parse these tables, comma seperated, DONOT prefix with schema, default all.
+  -threads uint
+        Works with -workType=2sql|rollback. threads to run (default 2)
+  -tl string
+        time location to parse timestamp/datetime column in binlog, such as Asia/Shanghai. default Local (default "Local")
+  -user string
+        mysql user.
+  -v    print version
+  -work-type string
+        valid options are:  2sql,rollback,stats. 2sql: convert binlog to sqls, rollback: generate rollback sqls, stats: analyze transactions. default: 2sql (default "2sql")
+PS D:\opensoft\my2sql>
+```
+
+
+
+
+
+### -U
+
+```
+优先使用unique key作为where条件，默认false
+```
+
+
+
+### -mode
+
+```
+repl: 伪装成从库解析binlog文件，file: 离线解析binlog文件, 默认repl
+```
+
+
+
+### -local-binlog-file
+
+```
+当指定-mode=file 参数时，需要指定-local-binlog-file binlog文件相对路径或绝对路径,可以连续解析多个binlog文件，只需要指定起始文件名，程序会自动持续解析下个文件
+```
+
+
+
+### -add-extraInfo
+
+```
+是否把database/table/datetime/binlogposition...信息以注释的方式加入生成的每条sql前，默认false
+```
+
+```
+# datetime=2020-07-16_10:44:09 database=orchestrator table=cluster_domain_name binlog=mysql-bin.011519 startpos=15552 stoppos=15773
+UPDATE `orchestrator`.`cluster_domain_name` SET `last_registered`='2020-07-16 10:44:09' WHERE `cluster_name`='192.168.1.1:3306'
+```
+
+
+
+### -big-trx-row-limit n
+
+```
+transaction with affected rows greater or equal to this value is considerated as big transaction 
+找出满足n条sql的事务，默认500条
+```
+
+
+
+### -databases 、 -tables
+
+```
+库及表条件过滤, 以逗号分隔
+```
+
+
+
+### -sql
+
+```
+要解析的sql类型，可选参数insert、update、delete，默认全部解析
+```
+
+
+
+### -doNotAddPrifixDb
+
+```
+Prefix table name witch database name in sql,ex: insert into db1.tb1 (x1, x1) values (y1, y1)
+默认生成insert into db1.tb1 (x1, x1) values (y1, y1)类sql，也可以生成不带库名的sql
+```
+
+
+
+### -file-per-table
+
+```
+为每个表生成一个sql文件
+```
+
+
+
+### -full-columns
+
+```
+For update sql, include unchanged columns. for update and delete, use all columns to build where condition.
+default false, this is, use changed columns to build set part, use primary/unique key to build where condition
+生成的sql是否带全列信息，默认false
+```
+
+
+
+### -ignorePrimaryKeyForInsert
+
+```
+生成的insert语句是否去掉主键，默认false
+```
+
+
+
+### -output-dir
+
+```
+将生成的结果存放到制定目录
+```
+
+
+
+### -output-toScreen
+
+```
+将生成的结果打印到屏幕，默认写到文件
+```
+
+
+
+### -threads
+
+```
+线程数，默认8个
+```
+
+
+
+### -work-type
+
+```
+2sql：生成原始sql，rollback：生成回滚sql，stats：只统计DML、事务信息
+```
+
 
 
 
@@ -2019,6 +2304,111 @@ git clone <url>
 
 
 ## 示例
+
+### 解析出标准SQL
+
+#### 根据时间点解析出标准SQL
+
+```
+#伪装成从库解析binlog
+./my2sql  -user root -password xxxx -host 127.0.0.1   -port 3306 -mode repl -work-type 2sql  -start-file mysql-bin.011259  -start-datetime "2020-07-16 10:20:00" -stop-datetime "2020-07-16 11:00:00" -output-dir ./tmpdir
+#直接读取binlog文件解析
+./my2sql  -user root -password xxxx -host 127.0.0.1   -port 3306 -mode file -local-binlog-file ./mysql-bin.011259  -work-type 2sql  -start-file mysql-bin.011259  -start-datetime "2020-07-16 10:20:00" -stop-datetime "2020-07-16 11:00:00" -output-dir ./tmpdir
+```
+
+
+
+#### 根据pos点解析出标准SQL
+
+```
+#伪装成从库解析binlog
+./my2sql  -user root -password xxxx -host 127.0.0.1   -port 3306 -mode repl  -work-type 2sql  -start-file mysql-bin.011259  -start-pos 4 -stop-file mysql-bin.011259 -stop-pos 583918266  -output-dir ./tmpdir
+#直接读取binlog文件解析
+./my2sql  -user root -password xxxx -host 127.0.0.1   -port 3306  -mode file -local-binlog-file ./mysql-bin.011259  -work-type 2sql  -start-file mysql-bin.011259  -start-pos 4 -stop-file mysql-bin.011259 -stop-pos 583918266  -output-dir ./tmpdir
+```
+
+
+
+
+
+### 解析出回滚SQL
+
+#### 根据时间点解析出回滚SQL
+
+```
+#伪装成从库解析binlog
+./my2sql  -user root -password xxxx -host 127.0.0.1   -port 3306 -mode repl -work-type rollback  -start-file mysql-bin.011259  -start-datetime "2020-07-16 10:20:00" -stop-datetime "2020-07-16 11:00:00" -output-dir ./tmpdir
+#直接读取binlog文件解析
+./my2sql  -user root -password xxxx -host 127.0.0.1   -port 3306  -mode file -local-binlog-file ./mysql-bin.011259 -work-type rollback  -start-file mysql-bin.011259  -start-datetime "2020-07-16 10:20:00" -stop-datetime "2020-07-16 11:00:00" -output-dir ./tmpdir
+```
+
+
+
+#### 根据pos点解析出回滚SQL
+
+```
+#伪装成从库解析binlog
+./my2sql  -user root -password xxxx -host 127.0.0.1   -port 3306 -mode repl -work-type rollback  -start-file mysql-bin.011259  -start-pos 4 -stop-file mysql-bin.011259 -stop-pos 583918266  -output-dir ./tmpdir
+#直接读取binlog文件解析
+./my2sql  -user root -password xxxx -host 127.0.0.1   -port 3306   -mode file -local-binlog-file ./mysql-bin.011259  -work-type rollback  -start-file mysql-bin.011259  -start-pos 4 -stop-file mysql-bin.011259 -stop-pos 583918266  -output-dir ./tmpdir
+
+```
+
+
+
+
+
+### 统计DML以及大事务
+
+#### 统计时间范围各个表的DML操作数量，统计一个事务大于500条、时间大于300秒的事务
+
+```
+#伪装成从库解析binlog
+./my2sql  -user root -password xxxx -host 127.0.0.1   -port 3306  -mode repl -work-type stats  -start-file mysql-bin.011259  -start-datetime "2020-07-16 10:20:00" -stop-datetime "2020-07-16 11:00:00"  -big-trx-row-limit 500 -long-trx-seconds 300   -output-dir ./tmpdir
+#直接读取binlog文件解析
+./my2sql  -user root -password xxxx -host 127.0.0.1   -port 3306 -mode file -local-binlog-file ./mysql-bin.011259   -work-type stats  -start-file mysql-bin.011259  -start-datetime "2020-07-16 10:20:00" -stop-datetime "2020-07-16 11:00:00"  -big-trx-row-limit 500 -long-trx-seconds 300   -output-dir ./tmpdir
+```
+
+
+
+#### 统计一段pos点范围各个表的DML操作数量，统计一个事务大于500条、时间大于300秒的事务
+
+```
+#伪装成从库解析binlog
+./my2sql  -user root -password xxxx -host 127.0.0.1   -port 3306  -mode repl -work-type stats  -start-file mysql-bin.011259  -start-pos 4 -stop-file mysql-bin.011259 -stop-pos 583918266  -big-trx-row-limit 500 -long-trx-seconds 300   -output-dir ./tmpdir
+#直接读取binlog文件解析
+./my2sql  -user root -password xxxx -host 127.0.0.1   -port 3306 -mode file -local-binlog-file ./mysql-bin.011259  -work-type stats  -start-file mysql-bin.011259  -start-pos 4 -stop-file mysql-bin.011259 -stop-pos 583918266  -big-trx-row-limit 500 -long-trx-seconds 300   -output-dir ./tmpdir
+```
+
+
+
+
+
+### 从某一个pos点解析出标准SQL，并且持续打印到屏幕
+
+```
+#伪装成从库解析binlog
+./my2sql  -user root -password xxxx -host 127.0.0.1   -port 3306 -mode repl  -work-type 2sql  -start-file mysql-bin.011259  -start-pos 4   -output-toScreen 
+```
+
+
+
+
+
+
+
+## 限制
+
+* 使用回滚/闪回功能时，binlog格式必须为row,且binlog_row_image=full， DML统计以及大事务分析不受影响
+* 只能回滚DML， 不能回滚DDL
+* 使用rollback功能时，要解析的binlog段，表结构要保持一致（例如：解析mysql-bin.000001文件，此binlog文件的的表有add column或drop column操作，则执行rollback可能会执行异常）
+* 支持指定-tl时区来解释binlog中time/datetime字段的内容。开始时间-start-datetime与结束时间-stop-datetime也会使用此指定的时区，
+  但注意此开始与结束时间针对的是binlog event header中保存的unix timestamp。结果中的额外的datetime时间信息都是binlog event header中的unix
+  timestamp
+* 此工具是伪装成从库拉取binlog，需要连接数据库的用户有SELECT, REPLICATION SLAVE, REPLICATION CLIENT权限
+* MySQL8.0版本需要在配置文件中加入default_authentication_plugin  =mysql_native_password，用户密码认证必须是mysql_native_password才能解析
+
+
 
 
 
@@ -2029,6 +2419,10 @@ git clone <url>
 
 
 ## 实战
+
+
+
+
 
 
 
