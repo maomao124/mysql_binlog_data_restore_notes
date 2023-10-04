@@ -1,18 +1,8 @@
+<h1 style="font-size:3em;color:skyblue;text-align:center">MySQL基于binlog数据恢复方案笔记</h1>
+
 [toc]
 
 ---
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -3317,7 +3307,19 @@ mysql> select count(*) from user;
 
 ## 概述
 
+MyFlash是由美团点评公司技术工程部开发维护的一个回滚DML操作的工具。该工具通过解析v4版本的binlog，完成回滚操作。相对已有的回滚工具，其增加了更多的过滤选项，让回滚更加容易。
 
+该工具已经在美团点评内部使用
+
+
+
+
+
+## 限制
+
+1. binlog格式必须为row,且binlog_row_image=full
+2. 仅支持5.6与5.7
+3. 只能回滚DML（增、删、改）
 
 
 
@@ -3329,21 +3331,109 @@ mysql> select count(*) from user;
 
 ## 环境部署
 
+项目是用c语言写的，源码不是跨平台的，生成的可执行文件也不是跨平台的，项目需要在Linux机器上编译和运行，c语言项目编译需要gcc编译器，项目需要`glib2-devel`库，克隆项目需要git
 
 
 
 
 
+### git
 
-## 项目部署
+参考 <a href="#git版本控制系统">git版本控制系统</a>
+
+
+
+### gcc
+
+c语言编译器，如果你的Linux机器上没有gcc，自行百度如何安装
+
+
+
+### glib2-devel
+
+
+
+安装命令：
+
+```sh
+yum install glib2-devel -y
+```
+
+
+
+centos机器上执行以上命令，ubuntu机器可以使用apt命令
+
+
+
+
+
+## 项目部署和编译
 
 ### 克隆项目
 
+命令：
+
+```sh
+git clone https://github.com/Meituan-Dianping/MyFlash
+```
+
+
+
+克隆完成后项目根目录如下：
+
+```sh
+PS D:\opensoft\MyFlash> ls
+
+
+    目录: D:\opensoft\MyFlash
+
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+d-----         2023/9/29     20:22                binary
+d-----         2023/9/29     20:22                doc
+d-----         2023/9/29     20:22                source
+d-----         2023/9/29     20:22                testbinlog
+-a----         2023/9/28      0:35             18 .gitignore
+-a----         2023/9/28      0:35            490 binlog_output_base.flashback
+-a----         2023/9/28      0:35            124 build.sh
+-a----         2023/9/28      0:35           1112 License.md
+-a----         2023/9/28      0:35           1299 README.md
+
+
+PS D:\opensoft\MyFlash>
+```
 
 
 
 
 
+### 编译项目
+
+#### 动态编译链接
+
+```sh
+gcc -w  `pkg-config --cflags --libs glib-2.0` source/binlogParseGlib.c  -o binary/flashback
+```
+
+
+
+然而用户不想每次去重新编译，可以选择使用静态链接，但是该方法需要知道glib库的版本和位置，因此对于每台机器略有不同
+
+
+
+#### 静态编译链接
+
+```sh
+gcc -w -g `pkg-config --cflags  glib-2.0` source/binlogParseGlib.c   -o binary/flashback /usr/lib64/libglib-2.0.a -lrt
+```
+
+
+
+为了保证在一台机器上编译后，可以在其它机器上使用，需要满足以下两个条件
+
+* 将glib做成静态链接
+* 在编译的那台机器的glibc版本（查看方法为ldd --version）要小于等于要运行该软件的那台机器glibc版本
 
 
 
@@ -3353,7 +3443,84 @@ mysql> select count(*) from user;
 
 ## 常用参数
 
+使用`./flashback --help`命令可以查看帮助：
 
+```sh
+Usage:
+  flashback [OPTION...]
+
+Help Options:
+  -?, --help                  Show help options
+
+Application Options:
+  --databaseNames             databaseName to apply. if multiple, seperate by comma(,)
+  --tableNames                tableName to apply. if multiple, seperate by comma(,)
+  --start-position            start position
+  --stop-position             stop position
+  --start-datetime            start time (format %Y-%m-%d %H:%M:%S)
+  --stop-datetime             stop time (format %Y-%m-%d %H:%M:%S)
+  --sqlTypes                  sql type to filter . support INSERT, UPDATE ,DELETE. if multiple, seperate by comma(,)
+  --maxSplitSize              max file size after split, the uint is M
+  --binlogFileNames           binlog files to process. if multiple, seperate by comma(,)
+  --outBinlogFileNameBase     output binlog file name base
+  --logLevel                  log level, available option is debug,warning,error
+  --include-gtids             gtids to process
+  --exclude-gtids             gtids to skip
+```
+
+
+
+- 1.databaseNames
+
+  指定需要回滚的数据库名。多个数据库可以用“,”隔开。如果不指定该参数，相当于指定了所有数据库。
+
+- 2.tableNames  
+
+  指定需要回滚的表名。多个表可以用“,”隔开。如果不指定该参数，相当于指定了所有表。
+
+- 3.start-position
+
+  指定回滚开始的位置。如不指定，从文件的开始处回滚。请指定正确的有效的位置，否则无法回滚
+
+- 4.stop-position
+
+  指定回滚结束的位置。如不指定，回滚到文件结尾。请指定正确的有效的位置，否则无法回滚
+
+- 5.start-datetime
+
+  指定回滚的开始时间。注意格式必须是 %Y-%m-%d %H:%M:%S。 如不指定，则不限定时间
+
+- 6.stop-datetime
+
+  指定回滚的结束时间。注意格式必须是 %Y-%m-%d %H:%M:%S。 如不指定，则不限定时间  
+
+- 7.sqlTypes
+
+  指定需要回滚的sql类型。目前支持的过滤类型是INSERT, UPDATE ,DELETE。多个类型可以用“,”隔开。
+
+- 8.maxSplitSize
+
+  *一旦指定该参数，对文件进行固定尺寸的分割（单位为M），过滤条件有效，但不进行回滚操作。该参数主要用来将大的binlog文件切割，防止单次应用的binlog尺寸过大，对线上造成压力*
+
+- 9.binlogFileNames
+
+  指定需要回滚的binlog文件，目前只支持单个文件，后续会增加多个文件支持  
+
+- 10.outBinlogFileNameBase
+
+  指定输出的binlog文件前缀，如不指定，则默认为binlog_output_base.flashback
+
+- 11.logLevel
+
+  仅供开发者使用，默认级别为error级别。在生产环境中不要修改这个级别，否则输出过多
+
+- 12.include-gtids
+
+  指定需要回滚的gtid,支持gtid的单个和范围两种形式。
+
+- 13.exclude-gtids
+
+  指定不需要回滚的gtid，用法同include-gtids
 
 
 
@@ -3361,9 +3528,40 @@ mysql> select count(*) from user;
 
 ## 示例
 
+### 回滚整个文件
+
+```sh
+./flashback --binlogFileNames=haha.000041
+mysqlbinlog binlog_output_base.flashback | mysql -h<host> -u<user> -p
+```
 
 
 
+
+
+### 回滚该文件中的所有insert语句
+
+```sh
+./flashback  --sqlTypes='INSERT' --binlogFileNames=haha.000041
+mysqlbinlog binlog_output_base.flashback | mysql -h<host> -u<user> -p
+```
+
+
+
+
+
+### 回滚大文件
+
+```sh
+回滚
+./flashback --binlogFileNames=haha.000042
+切割大文件
+./flashback --maxSplitSize=1 --binlogFileNames=binlog_output_base.flashback
+应用
+mysqlbinlog binlog_output_base.flashback.000001 | mysql -h<host> -u<user> -p
+...
+mysqlbinlog binlog_output_base.flashback.<N> | mysql -h<host> -u<user> -p
+```
 
 
 
@@ -3380,4 +3578,18 @@ mysql> select count(*) from user;
 
 
 # 总结
+
+MyFlash是c语言写的，不是跨平台的，有时候需要在Windows平台使用，binlog2sql是Python写的，效率比较低，解析binlog太慢，推荐使用my2sql
+
+<a href="#闪回大致流程">闪回大致流程</a>
+
+
+
+
+
+
+
+
+
+---
 
